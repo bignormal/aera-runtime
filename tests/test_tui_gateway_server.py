@@ -3446,7 +3446,11 @@ def test_ensure_session_db_row_persists_session_model_override(monkeypatch):
     server._ensure_session_db_row(
         {
             "session_key": "k1",
-            "model_override": {"model": "openai/gpt-5.5", "provider": "openrouter"},
+            "model_override": {
+                "model": "gpt-5.6-sol",
+                "provider": "custom",
+                "base_url": "https://custom.example/v1",
+            },
             "create_reasoning_override": {"effort": "high"},
             "create_service_tier_override": "priority",
         }
@@ -3454,9 +3458,10 @@ def test_ensure_session_db_row_persists_session_model_override(monkeypatch):
 
     assert len(created) == 1
     row = created[0]
-    assert row["model"] == "openai/gpt-5.5"
-    assert row["model_config"]["model"] == "openai/gpt-5.5"
-    assert row["model_config"]["provider"] == "openrouter"
+    assert row["model"] == "gpt-5.6-sol"
+    assert row["model_config"]["model"] == "gpt-5.6-sol"
+    assert row["model_config"]["provider"] == "custom"
+    assert row["model_config"]["base_url"] == "https://custom.example/v1"
     assert row["model_config"]["reasoning_config"] == {"effort": "high"}
     assert row["model_config"]["service_tier"] == "priority"
 
@@ -9846,21 +9851,26 @@ def test_session_create_records_ui_model_as_session_override(monkeypatch):
             "r1",
             {
                 "cols": 80,
-                "model": "claude-sonnet-4.6",
-                "provider": "anthropic",
+                "model": "gpt-5.6-sol",
+                "provider": "custom",
+                "base_url": "https://custom.example/v1",
                 "reasoning_effort": "high",
                 "fast": True,
             },
         )
         sid = resp["result"]["session_id"]
         sess = server._sessions[sid]
-        assert sess["model_override"] == {"model": "claude-sonnet-4.6", "provider": "anthropic"}
+        assert sess["model_override"] == {
+            "model": "gpt-5.6-sol",
+            "provider": "custom",
+            "base_url": "https://custom.example/v1",
+        }
         assert sess["create_reasoning_override"] is not None
         assert sess["create_service_tier_override"] == "priority"
         # The immediate response reflects the override (not the global default) so
         # the client never clobbers its sticky pick before the build lands.
-        assert resp["result"]["info"]["model"] == "claude-sonnet-4.6"
-        assert resp["result"]["info"]["provider"] == "anthropic"
+        assert resp["result"]["info"]["model"] == "gpt-5.6-sol"
+        assert resp["result"]["info"]["provider"] == "custom"
 
         # No knobs → no overrides; the session builds from the profile default.
         plain = server._methods["session.create"]("r2", {"cols": 80})
@@ -9870,6 +9880,33 @@ def test_session_create_records_ui_model_as_session_override(monkeypatch):
         assert plain_sess["create_service_tier_override"] is None
     finally:
         server._sessions.clear()
+
+
+def test_custom_session_override_preserves_matching_configured_api_mode():
+    cfg = {
+        "model": {
+            "provider": "custom",
+            "base_url": "https://custom.example/v1/",
+            "api_mode": "codex_responses",
+        }
+    }
+
+    assert (
+        server._configured_api_mode_for_session_override(
+            cfg,
+            requested_provider="custom",
+            base_url="https://custom.example/v1",
+        )
+        == "codex_responses"
+    )
+    assert (
+        server._configured_api_mode_for_session_override(
+            cfg,
+            requested_provider="custom",
+            base_url="https://other.example/v1",
+        )
+        is None
+    )
 
 
 def test_start_agent_build_passes_session_model_override(monkeypatch):

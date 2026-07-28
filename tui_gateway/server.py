@@ -4791,6 +4791,51 @@ def _resolve_runtime_with_fallback(
         raise
 
 
+def _configured_api_mode_for_session_override(
+    cfg: dict,
+    *,
+    requested_provider: str | None,
+    base_url: str | None,
+) -> str | None:
+    """Preserve the configured protocol for a bare custom endpoint override.
+
+    Desktop creates a new session with the selected model/provider/base URL so
+    the first prompt does not need the network-backed model inventory. A bare
+    ``custom`` endpoint is otherwise resolved as a direct alias, whose URL-only
+    protocol detection cannot know that a generic proxy speaks
+    ``codex_responses`` or ``anthropic_messages``. When the selected endpoint is
+    the profile's configured endpoint, carry that already-authoritative mode
+    into the per-session runtime. Named custom providers keep resolving their
+    own transport metadata and unrelated endpoints are never given a stale
+    global mode.
+    """
+    provider = str(requested_provider or "").strip().lower()
+    endpoint = str(base_url or "").strip().rstrip("/")
+    model_cfg = cfg.get("model") if isinstance(cfg, dict) else None
+    if (
+        provider != "custom"
+        or not endpoint
+        or not isinstance(model_cfg, dict)
+    ):
+        return None
+
+    configured_provider = str(model_cfg.get("provider") or "").strip().lower()
+    configured_endpoint = str(model_cfg.get("base_url") or "").strip().rstrip("/")
+    if configured_provider != "custom" or configured_endpoint != endpoint:
+        return None
+
+    mode = str(model_cfg.get("api_mode") or "").strip().lower()
+    if mode in {
+        "anthropic_messages",
+        "bedrock_converse",
+        "chat_completions",
+        "codex_app_server",
+        "codex_responses",
+    }:
+        return mode
+    return None
+
+
 def _make_agent(
     sid: str,
     key: str,
@@ -4870,7 +4915,13 @@ def _make_agent(
         requested_provider = model_override.get("provider") or provider_override or None
         override_base_url = model_override.get("base_url")
         override_api_key = model_override.get("api_key")
-        override_api_mode = model_override.get("api_mode")
+        override_api_mode = model_override.get("api_mode") or (
+            _configured_api_mode_for_session_override(
+                cfg,
+                requested_provider=requested_provider,
+                base_url=override_base_url,
+            )
+        )
         resolve_kwargs = {}
         if str(requested_provider or "").strip().lower() == "custom":
             # Session rows persisted before the custom-provider identity fix
@@ -5549,8 +5600,13 @@ def _(rid, params: dict) -> dict:
     # for a new chat can't mutate the profile default. provider is optional
     # (resolved at build).
     create_model = str(params.get("model") or "").strip()
+    create_base_url = str(params.get("base_url") or "").strip()
     session_model_override = (
-        {"model": create_model, "provider": str(params.get("provider") or "").strip() or None}
+        {
+            "model": create_model,
+            "provider": str(params.get("provider") or "").strip() or None,
+            **({"base_url": create_base_url} if create_base_url else {}),
+        }
         if create_model
         else None
     )
