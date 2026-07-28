@@ -4915,13 +4915,7 @@ def _make_agent(
         requested_provider = model_override.get("provider") or provider_override or None
         override_base_url = model_override.get("base_url")
         override_api_key = model_override.get("api_key")
-        override_api_mode = model_override.get("api_mode") or (
-            _configured_api_mode_for_session_override(
-                cfg,
-                requested_provider=requested_provider,
-                base_url=override_base_url,
-            )
-        )
+        override_api_mode = model_override.get("api_mode")
         resolve_kwargs = {}
         if str(requested_provider or "").strip().lower() == "custom":
             # Session rows persisted before the custom-provider identity fix
@@ -4962,6 +4956,16 @@ def _make_agent(
                 runtime["api_key"] = override_api_key
             if override_api_mode:
                 runtime["api_mode"] = override_api_mode
+            else:
+                configured_override_api_mode = (
+                    _configured_api_mode_for_session_override(
+                        cfg,
+                        requested_provider=requested_provider,
+                        base_url=override_base_url,
+                    )
+                )
+                if configured_override_api_mode:
+                    runtime["api_mode"] = configured_override_api_mode
     else:
         model, requested_provider = _resolve_startup_runtime()
         if isinstance(model_override, str) and model_override:

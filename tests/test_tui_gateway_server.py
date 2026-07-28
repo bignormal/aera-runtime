@@ -9883,6 +9883,7 @@ def test_session_create_records_ui_model_as_session_override(monkeypatch):
 
 
 def test_custom_session_override_preserves_matching_configured_api_mode():
+    """A matching bare custom endpoint inherits the profile transport."""
     cfg = {
         "model": {
             "provider": "custom",
@@ -9907,6 +9908,104 @@ def test_custom_session_override_preserves_matching_configured_api_mode():
         )
         is None
     )
+
+
+def test_make_agent_preserves_matching_plain_custom_api_mode(monkeypatch):
+    """A genuine bare custom endpoint keeps its configured transport."""
+    cfg = {
+        "model": {
+            "provider": "custom",
+            "base_url": "https://custom.example/v1",
+            "api_mode": "codex_responses",
+        }
+    }
+    _setup_make_agent_mocks(monkeypatch, cfg)
+    resolved = {}
+
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.canonical_custom_identity",
+        lambda **_kwargs: None,
+    )
+
+    def fake_resolve_runtime_provider(**kwargs):
+        resolved.update(kwargs)
+        return {
+            "provider": "custom",
+            "base_url": kwargs.get("explicit_base_url"),
+            "api_key": "test-key",
+            "api_mode": "chat_completions",
+            "command": None,
+            "args": None,
+            "credential_pool": None,
+        }
+
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        fake_resolve_runtime_provider,
+    )
+
+    with patch("run_agent.AIAgent") as mock_agent:
+        server._make_agent(
+            "sid1",
+            "key1",
+            model_override={
+                "model": "gpt-5.6-sol",
+                "provider": "custom",
+                "base_url": "https://custom.example/v1",
+            },
+        )
+
+    assert resolved["requested"] == "custom"
+    assert mock_agent.call_args.kwargs["api_mode"] == "codex_responses"
+
+
+def test_make_agent_keeps_recovered_named_custom_api_mode(monkeypatch):
+    """Named-provider recovery takes precedence over the bare fallback mode."""
+    cfg = {
+        "model": {
+            "provider": "custom",
+            "base_url": "https://custom.example/v1",
+            "api_mode": "codex_responses",
+        }
+    }
+    _setup_make_agent_mocks(monkeypatch, cfg)
+    resolved = {}
+
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.canonical_custom_identity",
+        lambda **_kwargs: "custom:named",
+    )
+
+    def fake_resolve_runtime_provider(**kwargs):
+        resolved.update(kwargs)
+        return {
+            "provider": "custom",
+            "base_url": kwargs.get("explicit_base_url"),
+            "api_key": "test-key",
+            "api_mode": "anthropic_messages",
+            "command": None,
+            "args": None,
+            "credential_pool": None,
+        }
+
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        fake_resolve_runtime_provider,
+    )
+
+    with patch("run_agent.AIAgent") as mock_agent:
+        server._make_agent(
+            "sid1",
+            "key1",
+            model_override={
+                "model": "claude-sonnet-4-6",
+                "provider": "custom",
+                "base_url": "https://custom.example/v1",
+            },
+        )
+
+    assert resolved["requested"] == "custom:named"
+    assert mock_agent.call_args.kwargs["api_mode"] == "anthropic_messages"
 
 
 def test_start_agent_build_passes_session_model_override(monkeypatch):
